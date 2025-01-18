@@ -25,6 +25,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.IntOffset
@@ -34,6 +35,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import coil.compose.rememberAsyncImagePainter
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.auth.api.signin.GoogleSignInClient
@@ -97,11 +99,25 @@ fun StockTalkApp(
             LoginScreen(
                 mAuth = mAuth,
                 googleSignInClient = googleSignInClient,
-                onLoginSuccess = { navController.navigate("postList") }
+                onLoginSuccess = {
+                    // Navigate to the swipe-first screen
+                    navController.navigate("swipeFirst")
+                }
+            )
+        }
+        composable("swipeFirst") {
+            SwipeStockScreen(
+                onBack = { /* Optionally allow user to go back */ },
+                onFinished = {
+                    // When swipe is finished, navigate to the post list.
+                    navController.navigate("postList") {
+                        // Remove the swipe screen from the backstack.
+                        popUpTo("swipeFirst") { inclusive = true }
+                    }
+                }
             )
         }
         composable("postList") {
-            // Remember a list of posts from our dummy repository.
             val posts = remember { mutableStateListOf<Post>().apply { addAll(PostRepository.getPosts()) } }
             PostListScreen(
                 posts = posts,
@@ -112,11 +128,11 @@ fun StockTalkApp(
                 mAuth = mAuth,
                 googleSignInClient = googleSignInClient,
                 onLoggedOut = {
-                    // After logout, navigate back to the login screen.
                     navController.navigate("login") {
                         popUpTo("postList") { inclusive = true }
                     }
-                }
+                },
+                onProfileClick = { navController.navigate("profile") }
             )
         }
         composable(
@@ -130,10 +146,21 @@ fun StockTalkApp(
             }
         }
         composable("stockSwipe") {
-            SwipeStockScreen(onBack = { navController.popBackStack() })
+            SwipeStockScreen(
+                onBack = { navController.popBackStack() },
+                onFinished = { navController.popBackStack() }
+            )
+        }
+        composable("profile") {
+            ProfileScreen(
+                mAuth = mAuth,
+                onBack = { navController.popBackStack() }
+            )
         }
     }
 }
+
+
 
 /**
  * LoginScreen displays a Google Sign-In button.
@@ -226,9 +253,10 @@ fun PostListScreen(
     posts: List<Post>,
     onPostClick: (Post) -> Unit,
     onSwipeClick: () -> Unit,
-    mAuth: FirebaseAuth, // passed from MainActivity
+    mAuth: FirebaseAuth,
     googleSignInClient: GoogleSignInClient,
-    onLoggedOut: () -> Unit
+    onLoggedOut: () -> Unit,
+    onProfileClick: () -> Unit  // Callback to launch the profile screen.
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -237,11 +265,21 @@ fun PostListScreen(
     val currentUser = mAuth.currentUser
     val userName = currentUser?.displayName ?: "Anonymous"
 
+    // State for search query.
+    var searchQuery by remember { mutableStateOf("") }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Hello, $userName!") },
                 actions = {
+                    // Profile button.
+                    IconButton(onClick = onProfileClick) {
+                        Icon(
+                            imageVector = Icons.Filled.CheckCircle,
+                            contentDescription = "Profile"
+                        )
+                    }
                     // Navigate to the swipe screen.
                     IconButton(onClick = onSwipeClick) {
                         Icon(
@@ -274,6 +312,7 @@ fun PostListScreen(
             )
         },
         bottomBar = {
+            // Keep the bottom bar with the liked tags and reset button.
             BottomAppBar(
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -292,17 +331,60 @@ fun PostListScreen(
                 }
             }
         }
-    ) { paddingValues ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = paddingValues
+    ) { innerPadding ->
+        // Main content now includes the search bar and the list of posts.
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
         ) {
-            items(posts) { post ->
-                PostListItem(post = post, onClick = { onPostClick(post) })
+            // Search bar immediately above posts.
+            Surface(
+                tonalElevation = 4.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        placeholder = { Text("Search stock ticker...") },
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(onClick = {
+                        // Placeholder action for search.
+                        Toast.makeText(
+                            context,
+                            "Search for '$searchQuery' coming soon!",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }) {
+                        Text("Search")
+                    }
+                }
+            }
+            // List of posts.
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(8.dp)
+            ) {
+                items(posts) { post ->
+                    PostListItem(post = post, onClick = { onPostClick(post) })
+                }
             }
         }
     }
 }
+
+
+
 
 
 /**
@@ -393,22 +475,22 @@ fun PostDetailScreen(post: Post, onBack: () -> Unit) {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SwipeStockScreen(onBack: () -> Unit) {
+fun SwipeStockScreen(
+    onBack: () -> Unit,
+    onFinished: () -> Unit
+) {
     // Dummy stock list.
     val dummyStocks = listOf(
-         Stock("AAPL", "Apple Inc.", 150.0, listOf("tech", "consumer electronics")),
-         Stock("TSLA", "Tesla Inc.", 700.0, listOf("tech", "automotive")),
-         Stock("GOOGL", "Alphabet Inc.", 2800.0, listOf("tech", "internet")),
-         Stock("AMZN", "Amazon.com Inc.", 3500.0, listOf("tech", "e-commerce")),
-         Stock("MSFT", "Microsoft Corp.", 300.0, listOf("tech", "software"))
+        Stock("AAPL", "Apple Inc.", 150.0, listOf("tech", "consumer electronics")),
+        Stock("TSLA", "Tesla Inc.", 700.0, listOf("tech", "automotive")),
+        Stock("GOOGL", "Alphabet Inc.", 2800.0, listOf("tech", "internet")),
+        Stock("AMZN", "Amazon.com Inc.", 3500.0, listOf("tech", "e-commerce")),
+        Stock("MSFT", "Microsoft Corp.", 300.0, listOf("tech", "software"))
     )
     var currentIndex by remember { mutableStateOf(0) }
-    val stock = dummyStocks.getOrNull(currentIndex)
-
-    // Animation offset.
+    val coroutineScope = rememberCoroutineScope()
     val offsetX = remember { Animatable(0f) }
     val swipeThreshold = 200f
-    val coroutineScope = rememberCoroutineScope()
 
     Scaffold(
         topBar = {
@@ -428,6 +510,8 @@ fun SwipeStockScreen(onBack: () -> Unit) {
                 .padding(paddingValues),
             contentAlignment = Alignment.Center
         ) {
+            // If there's a stock to show, display it.
+            val stock = dummyStocks.getOrNull(currentIndex)
             if (stock != null) {
                 Card(
                     modifier = Modifier
@@ -443,6 +527,10 @@ fun SwipeStockScreen(onBack: () -> Unit) {
                                 onDragEnd = {
                                     coroutineScope.launch {
                                         if (offsetX.value > swipeThreshold || offsetX.value < -swipeThreshold) {
+                                            // On swipe: add liked tags if swiped right.
+                                            if (offsetX.value > swipeThreshold / 2) {
+                                                likedTags.addAll(stock.tags)
+                                            }
                                             currentIndex++
                                         }
                                         offsetX.animateTo(
@@ -464,24 +552,82 @@ fun SwipeStockScreen(onBack: () -> Unit) {
                         Text(text = stock.name, style = MaterialTheme.typography.headlineLarge)
                     }
                 }
-                if (offsetX.value > swipeThreshold / 2) {
-                    Text(
-                        text = "Liked!",
-                        style = MaterialTheme.typography.displayMedium,
-                        modifier = Modifier.align(Alignment.TopCenter),
-                    )
-                    likedTags.addAll(stock.tags)
-
-                } else if (offsetX.value < -swipeThreshold / 2) {
-                    Text(
-                        text = "Disliked!",
-                        style = MaterialTheme.typography.displayMedium,
-                        modifier = Modifier.align(Alignment.TopCenter)
-                    )
-                }
             } else {
+                // When no more stocks remain, display a message then invoke onFinished.
                 Text(text = "No more stocks!", style = MaterialTheme.typography.headlineSmall)
+                // Launch a side-effect that navigates away after a short delay.
+                LaunchedEffect(Unit) {
+                    kotlinx.coroutines.delay(1000L)
+                    onFinished()
+                }
             }
+        }
+    }
+}
+
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ProfileScreen(
+    mAuth: FirebaseAuth,
+    onBack: () -> Unit
+) {
+    // Get current user information.
+    val user = mAuth.currentUser
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Profile") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            imageVector = Icons.Filled.ArrowBack,
+                            contentDescription = "Back"
+                        )
+                    }
+                }
+            )
+        }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .padding(innerPadding)
+                .fillMaxSize()
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // Display profile picture if available; otherwise, show a placeholder.
+            if (user?.photoUrl != null) {
+                // Example using Coil:
+                // Add Coil dependency in your build.gradle(:app) file:
+                // implementation("io.coil-kt:coil-compose:2.2.2")
+                androidx.compose.foundation.Image(
+                    painter = rememberAsyncImagePainter(user.photoUrl),
+                    contentDescription = "Profile Picture",
+                    modifier = Modifier
+                        .size(120.dp)
+                        .clip(MaterialTheme.shapes.medium)
+                )
+            } else {
+                // Fallback placeholder
+                Icon(
+                    imageVector = Icons.Filled.CheckCircle,
+                    contentDescription = "Profile Placeholder",
+                    modifier = Modifier.size(120.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = user?.displayName ?: "No display name",
+                style = MaterialTheme.typography.headlineMedium
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = user?.email ?: "No email available",
+                style = MaterialTheme.typography.bodyLarge
+            )
         }
     }
 }
