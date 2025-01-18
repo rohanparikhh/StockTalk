@@ -44,6 +44,7 @@ import com.google.firebase.auth.GoogleAuthProvider
 import kotlinx.coroutines.launch
 import java.text.DateFormat
 import kotlin.math.roundToInt
+import com.example.googlesignintest.Stock
 
 /**
  * MainActivity sets up Compose content and provides Firebase and Google Sign-In
@@ -77,6 +78,9 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+
+val likedTags = mutableSetOf<String>()
+
 
 /**
  * StockTalkApp sets up a NavHost and provides navigation between different screens.
@@ -222,21 +226,28 @@ fun PostListScreen(
     posts: List<Post>,
     onPostClick: (Post) -> Unit,
     onSwipeClick: () -> Unit,
-    mAuth: FirebaseAuth,
+    mAuth: FirebaseAuth, // passed from MainActivity
     googleSignInClient: GoogleSignInClient,
     onLoggedOut: () -> Unit
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
+    // Get the current user's name.
+    val currentUser = mAuth.currentUser
+    val userName = currentUser?.displayName ?: "Anonymous"
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Stocks Reddit") },
+                title = { Text("Hello, $userName!") },
                 actions = {
                     // Navigate to the swipe screen.
                     IconButton(onClick = onSwipeClick) {
-                        Icon(imageVector = Icons.Filled.Favorite, contentDescription = "Swipe Stocks")
+                        Icon(
+                            imageVector = Icons.Filled.Favorite,
+                            contentDescription = "Swipe Stocks"
+                        )
                     }
                     // Logout button.
                     IconButton(onClick = {
@@ -263,11 +274,22 @@ fun PostListScreen(
             )
         },
         bottomBar = {
-            BottomAppBar {
-                Text(
-                    "Swipe left or right to like/dislike stocks",
-                    modifier = Modifier.padding(16.dp)
-                )
+            BottomAppBar(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(start = 16.dp)) {
+                    Text(
+                        text = "Liked Tags: ${if(likedTags.isEmpty()) "None" else likedTags.joinToString(", ")}",
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                }
+                Spacer(modifier = Modifier.weight(1f))
+                TextButton(
+                    onClick = { likedTags.clear() },
+                    modifier = Modifier.padding(end = 16.dp)
+                ) {
+                    Text("Reset Liked Tags")
+                }
             }
         }
     ) { paddingValues ->
@@ -281,6 +303,7 @@ fun PostListScreen(
         }
     }
 }
+
 
 /**
  * Signs out of Firebase and Google.
@@ -372,7 +395,13 @@ fun PostDetailScreen(post: Post, onBack: () -> Unit) {
 @Composable
 fun SwipeStockScreen(onBack: () -> Unit) {
     // Dummy stock list.
-    val dummyStocks = listOf("AAPL", "TSLA", "GOOGL", "AMZN", "MSFT")
+    val dummyStocks = listOf(
+         Stock("AAPL", "Apple Inc.", 150.0, listOf("tech", "consumer electronics")),
+         Stock("TSLA", "Tesla Inc.", 700.0, listOf("tech", "automotive")),
+         Stock("GOOGL", "Alphabet Inc.", 2800.0, listOf("tech", "internet")),
+         Stock("AMZN", "Amazon.com Inc.", 3500.0, listOf("tech", "e-commerce")),
+         Stock("MSFT", "Microsoft Corp.", 300.0, listOf("tech", "software"))
+    )
     var currentIndex by remember { mutableStateOf(0) }
     val stock = dummyStocks.getOrNull(currentIndex)
 
@@ -432,15 +461,17 @@ fun SwipeStockScreen(onBack: () -> Unit) {
                             .background(MaterialTheme.colorScheme.primaryContainer),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(text = stock, style = MaterialTheme.typography.headlineLarge)
+                        Text(text = stock.name, style = MaterialTheme.typography.headlineLarge)
                     }
                 }
                 if (offsetX.value > swipeThreshold / 2) {
                     Text(
                         text = "Liked!",
                         style = MaterialTheme.typography.displayMedium,
-                        modifier = Modifier.align(Alignment.TopCenter)
+                        modifier = Modifier.align(Alignment.TopCenter),
                     )
+                    likedTags.addAll(stock.tags)
+
                 } else if (offsetX.value < -swipeThreshold / 2) {
                     Text(
                         text = "Disliked!",
