@@ -111,8 +111,15 @@ fun StockTalkApp(
         composable("swipeFirst") {
             // For demonstration purposes, we send a dummy userId.
             SwipeStockScreen(
+                userId = 1,
                 onBack = { /* Optionally allow user to go back */ },
-
+                onFinished = {
+                    // When swipe is finished, navigate to the post list.
+                    navController.navigate("postList") {
+                        // Remove the swipe screen from the backstack.
+                        popUpTo("swipeFirst") { inclusive = true }
+                    }
+                }
             )
         }
         composable("postList") {
@@ -500,16 +507,30 @@ fun PostDetailScreen(post: Post, onBack: () -> Unit) {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SwipeStockScreen(onBack: () -> Unit) {
-    // For this example, we'll use a dummy stock list.
-    val dummyStocks = listOf("AAPL", "TSLA", "GOOGL", "AMZN", "MSFT")
+fun SwipeStockScreen(
+    userId: Int,
+    onBack: () -> Unit,
+    onFinished: () -> Unit
+) {
+    var recommendations by remember { mutableStateOf<List<Stock>>(emptyList()) }
     var currentIndex by remember { mutableStateOf(0) }
-    val stock = dummyStocks.getOrNull(currentIndex)
-
-    // To animate swiping, we use an offset.
     val offsetX = remember { Animatable(0f) }
     val swipeThreshold = 200f
     val coroutineScope = rememberCoroutineScope()
+
+    // Fetch recommendations when the screen is loaded.
+    LaunchedEffect(Unit) {
+        try {
+            val response = ApiClient.stockApiService.getRecommendations(userId)
+            if (response.isSuccessful) {
+                recommendations = response.body() ?: emptyList()
+            } else {
+                println("Error fetching recommendations: ${response.message()}")
+            }
+        } catch (e: Exception) {
+            println("Error: ${e.localizedMessage}")
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -517,7 +538,7 @@ fun SwipeStockScreen(onBack: () -> Unit) {
                 title = { Text("Swipe Stocks") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Go back")
+                        Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }
             )
@@ -529,68 +550,53 @@ fun SwipeStockScreen(onBack: () -> Unit) {
                 .padding(paddingValues),
             contentAlignment = Alignment.Center
         ) {
-            if (stock != null) {
-                // The card with swipe gesture
+            if (currentIndex < recommendations.size) {
+                val stock = recommendations[currentIndex]
                 Card(
                     modifier = Modifier
                         .offset { IntOffset(offsetX.value.roundToInt(), 0) }
                         .pointerInput(stock) {
                             detectDragGestures(
                                 onDrag = { change, dragAmount ->
-                                    // Consume the gesture so it doesn't propagate.
                                     change.consume()
                                     coroutineScope.launch {
-                                        // Update the offset based on the drag amount.
                                         offsetX.snapTo(offsetX.value + dragAmount.x)
                                     }
                                 },
                                 onDragEnd = {
                                     coroutineScope.launch {
-                                        // Check if the swipe is strong enough
-                                        if (offsetX.value > swipeThreshold || offsetX.value < -swipeThreshold) {
-                                            // Move to next stock after a swipe
-                                            currentIndex++
+                                        if (offsetX.value > swipeThreshold) {
+                                            // Swiped right (like)
+                                            recordSwipe(userId, stock.id, "like")
+                                        } else if (offsetX.value < -swipeThreshold) {
+                                            // Swiped left (dislike)
+                                            recordSwipe(userId, stock.id, "dislike")
                                         }
-                                        // Animate the card back to the center
-                                        offsetX.animateTo(
-                                            targetValue = 0f,
-                                            animationSpec = tween(durationMillis = 300)
-                                        )
+                                        currentIndex++
+                                        offsetX.animateTo(0f)
                                     }
                                 }
                             )
                         },
-                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+                    elevation = CardDefaults.cardElevation(8.dp)
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(300.dp)
-                            .background(MaterialTheme.colorScheme.primaryContainer),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(text = stock, style = MaterialTheme.typography.headlineLarge)
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("Name: ${stock.name}", style = MaterialTheme.typography.titleLarge)
+                        Text("Ticker: ${stock.ticker}", style = MaterialTheme.typography.bodyMedium)
+                        Text("Sector: ${stock.sector}", style = MaterialTheme.typography.bodyMedium)
                     }
                 }
-                // Show a basic label for liking/disliking based on the offset.
-                if (offsetX.value > swipeThreshold / 2) {
-                    Text(
-                        text = "Liked!",
-                        style = MaterialTheme.typography.displayMedium,
-                        modifier = Modifier.align(Alignment.TopCenter)
-                    )
-                } else if (offsetX.value < -swipeThreshold / 2) {
-                    Text(
-                        text = "Disliked!",
-                        style = MaterialTheme.typography.displayMedium,
-                        modifier = Modifier.align(Alignment.TopCenter)
-                    )
-                }
             } else {
-                Text(text = "No more stocks!", style = MaterialTheme.typography.headlineSmall)
+                Text("No more stocks!", style = MaterialTheme.typography.headlineMedium)
+                LaunchedEffect(Unit) {
+                    kotlinx.coroutines.delay(1000L)
+                    onFinished()
+                }
             }
         }
     }
 }
+
 /**
  * Function to record a swipe (like or dislike).
  */
