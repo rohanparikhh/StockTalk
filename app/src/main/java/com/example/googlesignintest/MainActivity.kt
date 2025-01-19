@@ -67,7 +67,7 @@ class MainActivity : ComponentActivity() {
         mAuth = FirebaseAuth.getInstance()
 
         // Configure Google Sign-In.
-        // Replace "YOUR_WEB_CLIENT_ID" with your actual web client ID or use a string resource.
+        // Replace "YOUR_WEB_CLIENT_ID" with your actual web client ID in your strings.xml.
         val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
             .requestIdToken(getString(R.string.default_web_client_id))
             .requestEmail()
@@ -103,13 +103,13 @@ fun StockTalkApp(
                 mAuth = mAuth,
                 googleSignInClient = googleSignInClient,
                 onLoginSuccess = {
-                    // Navigate to the swipe-first screen
+                    // Navigate to the swipe-first screen.
                     navController.navigate("swipeFirst")
                 }
             )
         }
         composable("swipeFirst") {
-            // For demonstration purposes, we send a dummy userId
+            // For demonstration purposes, we send a dummy userId.
             SwipeStockScreen(
                 userId = 1,
                 onBack = { /* Optionally allow user to go back */ },
@@ -162,7 +162,7 @@ fun StockTalkApp(
 
 /**
  * LoginScreen displays a Google Sign-In button.
- * On successful sign in, it navigates to the Post List screen.
+ * On successful sign in, it navigates to the next screen.
  */
 @Composable
 fun LoginScreen(
@@ -173,6 +173,28 @@ fun LoginScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
+    // Set up a launcher to handle the Google Sign-In intent result.
+    val launcher =
+        rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            try {
+                val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
+                val account = task.getResult(ApiException::class.java)
+                if (account != null) {
+                    firebaseAuthWithGoogle(
+                        account = account,
+                        mAuth = mAuth,
+                        onLoginSuccess = onLoginSuccess,
+                        context = context
+                    )
+                } else {
+                    Toast.makeText(context, "Google Sign-In failed", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: ApiException) {
+                Toast.makeText(context, "Google Sign-In error: ${e.localizedMessage}", Toast.LENGTH_LONG)
+                    .show()
+            }
+        }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -182,7 +204,16 @@ fun LoginScreen(
     ) {
         Text(text = "Welcome to StockTalk!", style = MaterialTheme.typography.headlineMedium)
         Spacer(modifier = Modifier.height(16.dp))
+        GoogleSignInButton(onClick = {
+            // Create the sign-in intent and launch it.
+            val signInIntent: Intent = googleSignInClient.signInIntent
+            launcher.launch(signInIntent)
+        })
+
+        Spacer(modifier = Modifier.height(16.dp))
+        // Optionally, include an alternative register/sign in flow as well.
         Button(onClick = {
+            // For example, a dummy API call to sign in with email/password.
             val email = "test@example.com"
             val password = "securepassword"
 
@@ -199,7 +230,7 @@ fun LoginScreen(
                 }
             }
         }) {
-            Text("Register & Sign In")
+            Text("Register & Sign In (Email)")
         }
     }
 }
@@ -219,7 +250,7 @@ fun firebaseAuthWithGoogle(
             if (task.isSuccessful) {
                 onLoginSuccess()
             } else {
-                Toast.makeText(context, "Authentication failed", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "Firebase Authentication failed", Toast.LENGTH_SHORT).show()
             }
         }
 }
@@ -344,7 +375,7 @@ fun PostListScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            // Search bar
+            // Search bar.
             Surface(
                 tonalElevation = 4.dp,
                 modifier = Modifier
@@ -580,7 +611,6 @@ suspend fun recordSwipe(userId: Int, stockId: Int, swipeType: String) {
     }
 }
 
-
 /**
  * ProfileScreen shows the current user’s profile.
  */
@@ -642,7 +672,3 @@ fun ProfileScreen(
         }
     }
 }
-
-
-
-
