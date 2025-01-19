@@ -69,8 +69,13 @@ dependencies {
     // Keep only the KTX version
     implementation("com.google.firebase:firebase-auth-ktx")
 
-    implementation("com.google.android.gms:play-services-auth:20.5.0")
-    implementation("androidx.constraintlayout:constraintlayout:2.1.4")
-    implementation("io.coil-kt:coil-compose:2.2.2")
+    implementation("com.google.android.gms:play-services-auth:21.3.0")
+    implementation(libs.androidx.constraintlayout.v214)
+    implementation(libs.coil.compose)
+    implementation (libs.retrofit)
+    implementation (libs.converter.gson)
+    implementation ("com.squareup.okhttp3:okhttp:4.10.0")
+    implementation ("com.google.code.gson:gson:2.10.1")
+
 
 }

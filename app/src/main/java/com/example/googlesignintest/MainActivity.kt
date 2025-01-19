@@ -46,7 +46,10 @@ import com.google.firebase.auth.GoogleAuthProvider
 import kotlinx.coroutines.launch
 import java.text.DateFormat
 import kotlin.math.roundToInt
-import com.example.googlesignintest.Stock
+import com.example.googlesignintest.api.ApiClient
+import com.example.googlesignintest.api.Stock
+import com.example.googlesignintest.api.SwipeRequest
+import com.example.googlesignintest.api.UserRequest
 
 /**
  * MainActivity sets up Compose content and provides Firebase and Google Sign-In
@@ -81,8 +84,8 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+// Global mutable set for liked tags.
 val likedTags = mutableSetOf<String>()
-
 
 /**
  * StockTalkApp sets up a NavHost and provides navigation between different screens.
@@ -106,7 +109,9 @@ fun StockTalkApp(
             )
         }
         composable("swipeFirst") {
+            // For demonstration purposes, we send a dummy userId
             SwipeStockScreen(
+                userId = 1,
                 onBack = { /* Optionally allow user to go back */ },
                 onFinished = {
                     // When swipe is finished, navigate to the post list.
@@ -118,13 +123,14 @@ fun StockTalkApp(
             )
         }
         composable("postList") {
+            // Dummy PostRepository and Post data classes below if not defined elsewhere.
             val posts = remember { mutableStateListOf<Post>().apply { addAll(PostRepository.getPosts()) } }
             PostListScreen(
                 posts = posts,
                 onPostClick = { selectedPost ->
                     navController.navigate("postDetail/${selectedPost.id}")
                 },
-                onSwipeClick = { navController.navigate("stockSwipe") },
+                onSwipeClick = { navController.navigate("swipeFirst") },
                 mAuth = mAuth,
                 googleSignInClient = googleSignInClient,
                 onLoggedOut = {
@@ -145,12 +151,6 @@ fun StockTalkApp(
                 PostDetailScreen(post = post, onBack = { navController.popBackStack() })
             }
         }
-        composable("stockSwipe") {
-            SwipeStockScreen(
-                onBack = { navController.popBackStack() },
-                onFinished = { navController.popBackStack() }
-            )
-        }
         composable("profile") {
             ProfileScreen(
                 mAuth = mAuth,
@@ -159,8 +159,6 @@ fun StockTalkApp(
         }
     }
 }
-
-
 
 /**
  * LoginScreen displays a Google Sign-In button.
@@ -173,17 +171,7 @@ fun LoginScreen(
     onLoginSuccess: () -> Unit
 ) {
     val context = LocalContext.current
-
-    // Launcher to handle the result of the sign-in intent.
-    val signInLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
-        try {
-            val account = task.getResult(ApiException::class.java)
-            firebaseAuthWithGoogle(account!!, mAuth, onLoginSuccess, context)
-        } catch (e: ApiException) {
-            Toast.makeText(context, "Google Sign-In failed: ${e.statusCode}", Toast.LENGTH_SHORT).show()
-        }
-    }
+    val coroutineScope = rememberCoroutineScope()
 
     Column(
         modifier = Modifier
@@ -194,7 +182,25 @@ fun LoginScreen(
     ) {
         Text(text = "Welcome to StockTalk!", style = MaterialTheme.typography.headlineMedium)
         Spacer(modifier = Modifier.height(16.dp))
-        GoogleSignInButton(onClick = { signInLauncher.launch(googleSignInClient.signInIntent) })
+        Button(onClick = {
+            val email = "test@example.com"
+            val password = "securepassword"
+
+            coroutineScope.launch {
+                try {
+                    val response = ApiClient.userApiService.createUser(UserRequest(email, password))
+                    if (response.isSuccessful) {
+                        onLoginSuccess()
+                    } else {
+                        Toast.makeText(context, "Error: ${response.message()}", Toast.LENGTH_SHORT).show()
+                    }
+                } catch (e: Exception) {
+                    Toast.makeText(context, "Error: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }) {
+            Text("Register & Sign In")
+        }
     }
 }
 
@@ -312,13 +318,13 @@ fun PostListScreen(
             )
         },
         bottomBar = {
-            // Keep the bottom bar with the liked tags and reset button.
+            // Bottom bar with liked tags and a reset button.
             BottomAppBar(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(start = 16.dp)) {
                     Text(
-                        text = "Liked Tags: ${if(likedTags.isEmpty()) "None" else likedTags.joinToString(", ")}",
+                        text = "Liked Tags: ${if (likedTags.isEmpty()) "None" else likedTags.joinToString(", ")}",
                         style = MaterialTheme.typography.bodyLarge
                     )
                 }
@@ -332,13 +338,13 @@ fun PostListScreen(
             }
         }
     ) { innerPadding ->
-        // Main content now includes the search bar and the list of posts.
+        // Main content includes a search bar and the list of posts.
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            // Search bar immediately above posts.
+            // Search bar
             Surface(
                 tonalElevation = 4.dp,
                 modifier = Modifier
@@ -359,7 +365,6 @@ fun PostListScreen(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(onClick = {
-                        // Placeholder action for search.
                         Toast.makeText(
                             context,
                             "Search for '$searchQuery' coming soon!",
@@ -382,10 +387,6 @@ fun PostListScreen(
         }
     }
 }
-
-
-
-
 
 /**
  * Signs out of Firebase and Google.
@@ -476,21 +477,29 @@ fun PostDetailScreen(post: Post, onBack: () -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SwipeStockScreen(
+    userId: Int,
     onBack: () -> Unit,
     onFinished: () -> Unit
 ) {
-    // Dummy stock list.
-    val dummyStocks = listOf(
-        Stock("AAPL", "Apple Inc.", 150.0, listOf("tech", "consumer electronics")),
-        Stock("TSLA", "Tesla Inc.", 700.0, listOf("tech", "automotive")),
-        Stock("GOOGL", "Alphabet Inc.", 2800.0, listOf("tech", "internet")),
-        Stock("AMZN", "Amazon.com Inc.", 3500.0, listOf("tech", "e-commerce")),
-        Stock("MSFT", "Microsoft Corp.", 300.0, listOf("tech", "software"))
-    )
+    var recommendations by remember { mutableStateOf<List<Stock>>(emptyList()) }
     var currentIndex by remember { mutableStateOf(0) }
-    val coroutineScope = rememberCoroutineScope()
     val offsetX = remember { Animatable(0f) }
     val swipeThreshold = 200f
+    val coroutineScope = rememberCoroutineScope()
+
+    // Fetch recommendations when the screen is loaded.
+    LaunchedEffect(Unit) {
+        try {
+            val response = ApiClient.stockApiService.getRecommendations(userId)
+            if (response.isSuccessful) {
+                recommendations = response.body() ?: emptyList()
+            } else {
+                println("Error fetching recommendations: ${response.message()}")
+            }
+        } catch (e: Exception) {
+            println("Error: ${e.localizedMessage}")
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -498,7 +507,7 @@ fun SwipeStockScreen(
                 title = { Text("Swipe Stocks") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(imageVector = Icons.Filled.ArrowBack, contentDescription = "Go back")
+                        Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }
             )
@@ -510,9 +519,8 @@ fun SwipeStockScreen(
                 .padding(paddingValues),
             contentAlignment = Alignment.Center
         ) {
-            // If there's a stock to show, display it.
-            val stock = dummyStocks.getOrNull(currentIndex)
-            if (stock != null) {
+            if (currentIndex < recommendations.size) {
+                val stock = recommendations[currentIndex]
                 Card(
                     modifier = Modifier
                         .offset { IntOffset(offsetX.value.roundToInt(), 0) }
@@ -526,36 +534,29 @@ fun SwipeStockScreen(
                                 },
                                 onDragEnd = {
                                     coroutineScope.launch {
-                                        if (offsetX.value > swipeThreshold || offsetX.value < -swipeThreshold) {
-                                            // On swipe: add liked tags if swiped right.
-                                            if (offsetX.value > swipeThreshold / 2) {
-                                                likedTags.addAll(stock.tags)
-                                            }
-                                            currentIndex++
+                                        if (offsetX.value > swipeThreshold) {
+                                            // Swiped right (like)
+                                            recordSwipe(userId, stock.id, "like")
+                                        } else if (offsetX.value < -swipeThreshold) {
+                                            // Swiped left (dislike)
+                                            recordSwipe(userId, stock.id, "dislike")
                                         }
-                                        offsetX.animateTo(
-                                            targetValue = 0f,
-                                            animationSpec = tween(durationMillis = 300)
-                                        )
+                                        currentIndex++
+                                        offsetX.animateTo(0f)
                                     }
                                 }
                             )
                         },
-                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+                    elevation = CardDefaults.cardElevation(8.dp)
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(300.dp)
-                            .background(MaterialTheme.colorScheme.primaryContainer),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(text = stock.name, style = MaterialTheme.typography.headlineLarge)
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("Name: ${stock.name}", style = MaterialTheme.typography.titleLarge)
+                        Text("Ticker: ${stock.ticker}", style = MaterialTheme.typography.bodyMedium)
+                        Text("Sector: ${stock.sector}", style = MaterialTheme.typography.bodyMedium)
                     }
                 }
             } else {
-                // When no more stocks remain, display a message then invoke onFinished.
-                Text(text = "No more stocks!", style = MaterialTheme.typography.headlineSmall)
-                // Launch a side-effect that navigates away after a short delay.
+                Text("No more stocks!", style = MaterialTheme.typography.headlineMedium)
                 LaunchedEffect(Unit) {
                     kotlinx.coroutines.delay(1000L)
                     onFinished()
@@ -565,14 +566,30 @@ fun SwipeStockScreen(
     }
 }
 
+/**
+ * Function to record a swipe (like or dislike).
+ */
+suspend fun recordSwipe(userId: Int, stockId: Int, swipeType: String) {
+    try {
+        val response = ApiClient.swipeApiService.recordSwipe(SwipeRequest(userId, stockId, swipeType))
+        if (!response.isSuccessful) {
+            println("Failed to record swipe: ${response.message()}")
+        }
+    } catch (e: Exception) {
+        println("Error recording swipe: ${e.localizedMessage}")
+    }
+}
 
+
+/**
+ * ProfileScreen shows the current user’s profile.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileScreen(
     mAuth: FirebaseAuth,
     onBack: () -> Unit
 ) {
-    // Get current user information.
     val user = mAuth.currentUser
 
     Scaffold(
@@ -597,11 +614,7 @@ fun ProfileScreen(
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Display profile picture if available; otherwise, show a placeholder.
             if (user?.photoUrl != null) {
-                // Example using Coil:
-                // Add Coil dependency in your build.gradle(:app) file:
-                // implementation("io.coil-kt:coil-compose:2.2.2")
                 androidx.compose.foundation.Image(
                     painter = rememberAsyncImagePainter(user.photoUrl),
                     contentDescription = "Profile Picture",
@@ -610,14 +623,12 @@ fun ProfileScreen(
                         .clip(MaterialTheme.shapes.medium)
                 )
             } else {
-                // Fallback placeholder
                 Icon(
                     imageVector = Icons.Filled.CheckCircle,
                     contentDescription = "Profile Placeholder",
                     modifier = Modifier.size(120.dp)
                 )
             }
-
             Spacer(modifier = Modifier.height(16.dp))
             Text(
                 text = user?.displayName ?: "No display name",
@@ -631,3 +642,7 @@ fun ProfileScreen(
         }
     }
 }
+
+
+
+
